@@ -4,6 +4,8 @@ package client
 
 import (
 	"bufio"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -26,46 +28,47 @@ func Client(ip string) {
 	}
 	defer conn.Close()
 
-	var myIndex int32
-	fmt.Fscanf(conn, "%d", &myIndex)
+	serverReader := bufio.NewReader(conn)
+	serverWriter := bufio.NewWriter(conn)
+	serverRW := bufio.NewReadWriter(serverReader, serverWriter)
+
+	myIndex := getIndex(serverRW)
+
 	drawer.SetSides(myIndex)
 
 	// Not to let player bet "0" 3 times in a row
 	myBets := make([]int32, 0)
 
-	sendHello(conn)
+	sendHello(serverRW)
 
 	for {
-		var N int32
-		fmt.Fscanf(conn, "%d", &N)
+		N := getNumber(serverRW)
 
 		// End flag
 		if N == -1 {
 			break
 		}
 		// Scan primary info
-		att, darkFlag := int32(0), 0
-		fmt.Fscanf(conn, "%d", &att)
-		fmt.Fscanf(conn, "%d", &darkFlag)
+		att, darkFlag := getInfo(serverRW)
 
 		drawer.UpdateIndex(N)
 		var myCards []int32
 
 		// Dark round check
 		if darkFlag == 0 {
-			myCards = gatherCards(conn, N)
-			myBets = takeBets(conn, myBets, att, myIndex)
+			myCards = getCards(serverRW, N)
+			myBets = takeBets(serverRW, myBets, att, myIndex)
 		} else {
-			myBets = takeBets(conn, myBets, att, myIndex)
-			myCards = gatherCards(conn, N)
+			myBets = takeBets(serverRW, myBets, att, myIndex)
+			myCards = getCards(serverRW, N)
 		}
 
 		// Holding a board and its results
 		for n := N; n > 0; n-- {
-			takeBoard(conn, myCards, n, att, myIndex)
+			takeBoard(serverRW, myCards, n, att, myIndex)
 			drawer.UpdateIndex(n - 1)
 
-			fmt.Fscanf(conn, "%d", &att)
+			att = getWinner(serverRW)
 			drawer.AddWin(att)
 			drawer.FlushBoard()
 		}
@@ -73,15 +76,68 @@ func Client(ip string) {
 		// Get results of the round
 		tmp := int32(0)
 		for i := int32(0); i < 3; i++ {
-			fmt.Fscanf(conn, "%d", &tmp)
+			tmp = getRes(serverRW)
 			drawer.AddRes(i, tmp)
 		}
 		drawer.FlushRound()
 	}
 }
 
+// takeBets leads player through bets
+func takeBets(rw *bufio.ReadWriter, myBets []int32, att, myIndex int32) []int32 {
+	var arrState int32
+	for i := int32(0); i < 3; i++ {
+		arrState = (3 + att + i - myIndex) % 3
+		drawer.SetArrow(arrState)
+		drawer.Draw()
+		var b int32
+		// time for own bet
+		if arrState == 0 {
+			b, myBets = scanUserBet(myBets)
+			sendBet(rw, b)
+		}
+
+		b = getBet(rw)
+		drawer.SetBet((att+i)%3, b)
+	}
+	return myBets
+}
+
+// takeBoard leads client through board
+func takeBoard(rw *bufio.ReadWriter, myCards []int32, totalCards, att, myIndex int32) {
+	var arrState int32
+	for i := int32(0); i < 3; i++ {
+		arrState = (3 + att + i - myIndex) % 3
+		drawer.SetArrow(arrState)
+		drawer.Draw()
+		var c int32
+
+		// Time for own move
+		if arrState == 0 {
+			c = scanCardIndex(totalCards)
+			drawer.ReplaceCard(c-1, totalCards-1)
+			myCards[c-1], myCards[totalCards-1] = myCards[totalCards-1], myCards[c-1]
+			if myCards[totalCards-1] != drawer.GetMagic() {
+				sendCard(rw, myCards[totalCards-1])
+			} else {
+				sendCard(rw, parseMagic())
+			}
+		}
+
+		// store visible changes of the board
+		drawer.FlushCard((att+i)%3, totalCards-1)
+		c = getCard(rw)
+		drawer.SetCard((att+i)%3, c)
+	}
+	drawer.Draw()
+
+	fmt.Println("Press Enter to continue")
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Scan()
+}
+
 // sendHello makes sure player is ready and send hello to server
-func sendHello(conn net.Conn) {
+func sendHello(rw *bufio.ReadWriter) {
 	// Some rules
 	fmt.Println("That's a game with hard rules. I'll explain them.")
 	fmt.Println("Remember, that J♧ is the magic card. It could be interpretated as any of 36 usual cards. Moreover, it could be interpretated as a 5 of any suit")
@@ -97,47 +153,167 @@ func sendHello(conn net.Conn) {
 	for s == "" {
 		fmt.Scanf("%s", &s)
 	}
-	fmt.Fprintln(conn, s)
+	err := writeInt32(rw.Writer, 0)
+	if err != nil {
+		log.Fatal(err.Error() + " in sendHello")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in sendHello")
+	}
 	fmt.Println("Waiting for others")
 }
 
-// gatherCards scans N cards from connection conn and returns slice of these cards
-func gatherCards(conn net.Conn, N int32) []int32 {
+// sends bet b to rw
+func sendBet(rw *bufio.ReadWriter, b int32) {
+	err := writeInt32(rw.Writer, b)
+	if err != nil {
+		log.Fatal(err.Error() + " in sendBet")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in sendBet")
+	}
+}
+
+// sendCard sends card c to rw
+func sendCard(rw *bufio.ReadWriter, c int32) {
+	err := writeInt32(rw.Writer, c)
+	if err != nil {
+		log.Fatal(err.Error() + " in sendCard")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in sendCard")
+	}
+}
+
+// Writes int32 to w
+func writeInt32(w *bufio.Writer, val int32) error {
+	return binary.Write(w, binary.BigEndian, val)
+}
+
+// getIndex gets client's index from rw.
+func getIndex(rw *bufio.ReadWriter) (i int32) {
+	i, err := readInt32(rw.Reader)
+	if err != nil {
+		log.Fatal(err.Error() + " in getIndex")
+	}
+	return
+}
+
+// getInfo gets majot info about upcoming round
+func getInfo(rw *bufio.ReadWriter) (att, df int32) {
+	vals, err := readFewInt32(rw.Reader, 2)
+	if err != nil {
+		log.Fatal(err.Error() + " in getInfo")
+	}
+	_ = vals[1]
+	return vals[0], vals[1]
+}
+
+// getNumber gets a number of cards in upcoming round
+func getNumber(rw *bufio.ReadWriter) (n int32) {
+	n, err := readInt32(rw.Reader)
+	if err != nil {
+		log.Fatal(err.Error() + " in getNumber")
+	}
+	return
+}
+
+// getCards gets N cards from rw and returns slice of these cards
+func getCards(rw *bufio.ReadWriter, N int32) []int32 {
 	cards := make([]int32, N)
 	for i := int32(0); i < N; i++ {
-		fmt.Fscanf(conn, "%d", &(cards[i]))
+		cards[i] = getCard(rw)
 	}
+
 	// Find out  trump
-	var tr int32
-	fmt.Fscanf(conn, "%d", &tr)
+	tr := getTrump(rw)
 
 	drawer.SetDecks(cards)
 	drawer.SetTrump(tr)
 	return cards
 }
 
-// takeBets leads player through bets
-func takeBets(conn net.Conn, myBets []int32, att, myIndex int32) []int32 {
-	var arrState int32
-	for i := int32(0); i < 3; i++ {
-		arrState = (3 + att + i - myIndex) % 3
-		drawer.SetArrow(arrState)
-		drawer.Draw()
-		var b int32
-		// time for own bet
-		if arrState == 0 {
-			b, myBets = scanBet(myBets)
-			fmt.Fprintln(conn, b)
-		}
-
-		fmt.Fscanf(conn, "%d", &b)
-		drawer.SetBet((att+i)%3, b)
+// getTrump gets a trump from rw.
+func getTrump(rw *bufio.ReadWriter) (tr int32) {
+	tr, err := readInt32(rw.Reader)
+	if err != nil {
+		log.Fatal(err.Error() + " in getTrump")
 	}
-	return myBets
+	return
 }
 
-// scanBet scans player's bet, assume it's correct and sends it to server
-func scanBet(prevBets []int32) (int32, []int32) {
+// getBet gets one player bet from rw.
+func getBet(rw *bufio.ReadWriter) (b int32) {
+	b, err := readInt32(rw.Reader)
+	if err != nil {
+		log.Fatal(err.Error() + " in getBet")
+	}
+	return
+}
+
+// getCard gets a card from rw.
+func getCard(rw *bufio.ReadWriter) (c int32) {
+	c, err := readInt32(rw.Reader)
+	if err != nil {
+		log.Fatal(err.Error() + " in getCard")
+	}
+	return
+}
+
+// getWinner gets winner index from rw.
+func getWinner(rw *bufio.ReadWriter) (w int32) {
+	w, err := readInt32(rw.Reader)
+	if err != nil {
+		log.Fatal(err.Error() + " in getWinner")
+	}
+	return
+}
+
+// getRes gets one player result score for a round from rw.
+func getRes(rw *bufio.ReadWriter) (r int32) {
+	r, err := readInt32(rw.Reader)
+	if err != nil {
+		log.Fatal(err.Error() + " in getRes")
+	}
+	return
+}
+
+// Reads n int32 values from r, not divided by anything.
+func readFewInt32(r *bufio.Reader, n int) ([]int32, error) {
+	p := make([]byte, 4)
+	res := make([]int32, n)
+	for i := 0; i < n; i++ {
+		b, err := r.Read(p)
+		if err != nil {
+			return nil, err
+		}
+		if b != 4 {
+			return nil, errors.New("read: number of read bytes isn't 4")
+		}
+		res[i] = int32(binary.BigEndian.Uint32(p))
+	}
+	return res, nil
+}
+
+// Reads int32 from r.
+func readInt32(r *bufio.Reader) (int32, error) {
+	p := make([]byte, 4)
+	n, err := r.Read(p)
+	if err != nil {
+		return 0, err
+	}
+	if n != 4 {
+		return 0, errors.New("read: number of read bytes isn't 4")
+	}
+	val := int32(binary.BigEndian.Uint32(p))
+	return val, nil
+}
+
+// scanUserBet scans player's bet from keyboard, checks it's correctness and sends it to server.
+func scanUserBet(prevBets []int32) (int32, []int32) {
 	var b int32 = -1
 	for {
 		fmt.Println("Send bet")
@@ -157,41 +333,8 @@ func scanBet(prevBets []int32) (int32, []int32) {
 	return b, prevBets
 }
 
-// takeBoard leads client through board
-func takeBoard(conn net.Conn, myCards []int32, totalCards, att, myIndex int32) {
-	var arrState int32
-	for i := int32(0); i < 3; i++ {
-		arrState = (3 + att + i - myIndex) % 3
-		drawer.SetArrow(arrState)
-		drawer.Draw()
-		var c int32
-
-		// Time for own move
-		if arrState == 0 {
-			c = scanCardIndex(totalCards)
-			drawer.ReplaceCard(c-1, totalCards-1)
-			myCards[c-1], myCards[totalCards-1] = myCards[totalCards-1], myCards[c-1]
-			if myCards[totalCards-1] != drawer.GetMagic() {
-				fmt.Fprintln(conn, myCards[totalCards-1])
-			} else {
-				fmt.Fprintln(conn, parseMagic())
-			}
-		}
-
-		// store visible changes of the board
-		drawer.FlushCard((att+i)%3, totalCards-1)
-		fmt.Fscanf(conn, "%d", &c)
-		drawer.SetCard((att+i)%3, c)
-	}
-	drawer.Draw()
-
-	fmt.Println("Press Enter to continue")
-	sc := bufio.NewScanner(os.Stdin)
-	sc.Scan()
-}
-
 // scanCardIndex is a function, which returns number of the chosen card from the slice of cards.
-// n stands for number of cards in slice
+// n stands for number of cards in slice.
 func scanCardIndex(n int32) (c int32) {
 	for {
 		fmt.Println("Choose card")

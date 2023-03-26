@@ -1,101 +1,194 @@
 // package procconn holds the connection between client and "handler".
 // It is designed to avoid confusion between "handler"-"processor" and "handler"-client data exchange.
 // Functions are:
-// func SendIndex          (net.Conn, int32)
-// func SendNumberOfCards  (net.Conn, int32)
-// func SendAttackerAndFlag(net.Conn, datatypes.Player, int32)
-// func SendDeck           (net.Conn, datatypes.RoundInfo)
-// func SendBet            (net.Conn, datatypes.BetInfo)
-// func SendCard           (net.Conn, datatypes.MoveInfo)
-// func SendWinner         (net.Conn, datatypes.WinInfo)
-// func SendRes            (net.Conn, datatypes.ResultsInfo)
-// func SendGB             (net.Conn)
-// func GetHello           (net.Conn)
-// func GetBet             (net.Conn) (int32)
-// func GetCard            (net.Conn) (datatypes.Card)
+// func SendIndex          (*bufio.ReadWriter, int32)
+// func SendNumberOfCards  (*bufio.ReadWriter, int32)
+// func SendAttackerAndFlag(*bufio.ReadWriter, datatypes.Player, int32)
+// func SendDeck           (*bufio.ReadWriter, datatypes.RoundInfo)
+// func SendBet            (*bufio.ReadWriter, datatypes.BetInfo)
+// func SendCard           (*bufio.ReadWriter, datatypes.MoveInfo)
+// func SendWinner         (*bufio.ReadWriter, datatypes.WinInfo)
+// func SendRes            (*bufio.ReadWriter, datatypes.ResultsInfo)
+// func SendGB             (*bufio.ReadWriter)
+// func GetHello           (*bufio.ReadWriter)
+// func GetBet             (*bufio.ReadWriter) (int32)
+// func GetCard            (*bufio.ReadWriter) (datatypes.Card)
 package clientconn
 
 import (
-	"fmt"
+	"bufio"
+	"encoding/binary"
+	"errors"
 	"log"
-	"net"
 
 	"github.com/TblKVANYA/hussarGame/server/datatypes"
 )
 
 // Sends player his index.
-func SendIndex(conn net.Conn, index int32) {
-	fmt.Fprintln(conn, index)
+func SendIndex(rw *bufio.ReadWriter, index int32) {
+	err := writeInt32(rw.Writer, index)
+	if err != nil {
+		log.Fatal(err.Error() + " in SendIndex")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in SendIndex")
+	}
 }
 
 // Sends player number of cards in upcoming round.
-func SendNumberOfCards(conn net.Conn, N int32) {
-	fmt.Fprintln(conn, N)
+func SendNumberOfCards(rw *bufio.ReadWriter, N int32) {
+	err := writeInt32(rw.Writer, N)
+	if err != nil {
+		log.Fatal(err.Error() + " in SendNumberOfCards")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in SendNumberOfCards")
+	}
 }
 
 // Sends major information about upcoming round.
-func SendAttackerAndFlag(conn net.Conn, i datatypes.Player, fl int32) {
-	fmt.Fprintln(conn, int32(i))
-	fmt.Fprintln(conn, fl)
+func SendAttackerAndFlag(rw *bufio.ReadWriter, i datatypes.Player, fl int32) {
+	err := writeInt32(rw.Writer, int32(i))
+	if err != nil {
+		log.Fatal(err.Error() + " in SendAttackerAndFlag")
+	}
+	err = writeInt32(rw.Writer, fl)
+	if err != nil {
+		log.Fatal(err.Error() + " in SendAttackerAndFlag")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in SendAttackerAndFlag")
+	}
 }
 
-// Sends player's deck to him.
-func SendDeck(conn net.Conn, info datatypes.RoundInfo) {
+// Sends player's deck and trump.
+func SendDeck(rw *bufio.ReadWriter, info datatypes.RoundInfo) {
+	var err error
 	for i := int32(0); i < info.NumOfCards; i++ {
-		fmt.Fprintln(conn, int32(info.Cards[i]))
+		err = writeInt32(rw.Writer, int32(info.Cards[i]))
+		if err != nil {
+			log.Fatal(err.Error() + " in SendDeck")
+		}
 	}
-	fmt.Fprintln(conn, int32(info.Trump))
+
+	err = writeInt32(rw.Writer, int32(info.Trump))
+	if err != nil {
+		log.Fatal(err.Error() + " in SendDeck")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in SendDeck")
+	}
 }
 
 // Sends one's bet to the player.
-func SendBet(conn net.Conn, b datatypes.BetInfo) {
-	fmt.Fprintln(conn, b.Bet)
+func SendBet(rw *bufio.ReadWriter, b datatypes.BetInfo) {
+	err := writeInt32(rw.Writer, b.Bet)
+	if err != nil {
+		log.Fatal(err.Error() + " in SendBet")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in SendBet")
+	}
 }
 
 // Sends one's move to the player.
-func SendCard(conn net.Conn, c datatypes.MoveInfo) {
-	fmt.Fprintln(conn, int32(c.Card))
+func SendCard(rw *bufio.ReadWriter, c datatypes.MoveInfo) {
+	err := writeInt32(rw.Writer, int32(c.Card))
+	if err != nil {
+		log.Fatal(err.Error() + " in SendCard")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in SendCard")
+	}
 }
 
 // Sends who has won the board to the player.
-func SendWinner(conn net.Conn, i datatypes.WinInfo) {
-	fmt.Fprintln(conn, int32(i.Player))
+func SendWinner(rw *bufio.ReadWriter, i datatypes.WinInfo) {
+	err := writeInt32(rw.Writer, int32(i.Player))
+	if err != nil {
+		log.Fatal(err.Error() + " in SendWinner")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in SendWinner")
+	}
 }
 
 // Sends results of the round to the player.
-func SendRes(conn net.Conn, t datatypes.ResultsInfo) {
-	fmt.Fprintf(conn, "%d %d %d\n", t.Res[0], t.Res[1], t.Res[2])
+func SendRes(rw *bufio.ReadWriter, t datatypes.ResultsInfo) {
+	var err error
+	for i := 0; i < 3; i++ {
+		err = writeInt32(rw.Writer, t.Res[i])
+		if err != nil {
+			log.Fatal(err.Error() + "in SendRes")
+		}
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in SendRes")
+	}
 }
 
 // Sends flag of game ending to the player.
-func SendGB(conn net.Conn) {
-	fmt.Fprintln(conn, -1)
+func SendGB(rw *bufio.ReadWriter) {
+	err := writeInt32(rw.Writer, int32(-1))
+	if err != nil {
+		log.Fatal(err.Error() + " in SendGb")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in SendGb")
+	}
 }
 
 // Gets smth from to player to ensure he is ready.
-func GetHello(conn net.Conn) {
-	s := ""
-	_, err := fmt.Fscan(conn, &s)
+func GetHello(rw *bufio.ReadWriter) {
+	_, err := readInt32(rw.Reader)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
 // Gets a bet from the player.
-func GetBet(conn net.Conn) (bet int32) {
-	_, err := fmt.Fscan(conn, &bet)
+func GetBet(rw *bufio.ReadWriter) int32 {
+	b, err := readInt32(rw.Reader)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(err.Error() + " in GetBet")
 	}
-	return
+	return b
 }
 
 // Gets a card from the player.
-func GetCard(conn net.Conn) (c datatypes.Card) {
-	var val int32
-	_, err := fmt.Fscan(conn, &val)
+func GetCard(rw *bufio.ReadWriter) datatypes.Card {
+	card, err := readInt32(rw.Reader)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(err.Error() + " in GetCard")
 	}
-	return datatypes.Card(val)
+	return datatypes.Card(card)
+}
+
+// Writes int32 value to w.
+func writeInt32(w *bufio.Writer, val int32) error {
+	return binary.Write(w, binary.BigEndian, val)
+}
+
+// Reads int32 value from r.
+func readInt32(r *bufio.Reader) (int32, error) {
+	p := make([]byte, 4)
+	n, err := r.Read(p)
+	if err != nil {
+		return 0, err
+	}
+	if n != 4 {
+		return 0, errors.New("read: number of read bytes isn't 4")
+	}
+
+	val := int32(binary.BigEndian.Uint32(p))
+	return val, nil
 }
