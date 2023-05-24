@@ -1,6 +1,7 @@
 // package procconn holds the connection between client and "handler".
 // It is designed to avoid confusion between "handler"-"processor" and "handler"-client data exchange.
 // Functions are:
+// func SendNumberOfPlayers(*bufio.ReadWriter, int32)
 // func SendIndex          (*bufio.ReadWriter, int32)
 // func SendNumberOfCards  (*bufio.ReadWriter, int32)
 // func SendAttackerAndFlag(*bufio.ReadWriter, datatypes.Player, int32)
@@ -11,6 +12,7 @@
 // func SendRes            (*bufio.ReadWriter, datatypes.ResultsInfo)
 // func SendGB             (*bufio.ReadWriter)
 // func GetHello           (*bufio.ReadWriter)
+// func GetNumber          (*bufio.ReadWriter) (int32)
 // func GetBet             (*bufio.ReadWriter) (int32)
 // func GetCard            (*bufio.ReadWriter) (datatypes.Card)
 package clientconn
@@ -23,6 +25,18 @@ import (
 
 	"github.com/TblKVANYA/hussarGame/server/datatypes"
 )
+
+// Sends player number of players.
+func SendNumberOfPlayers(rw *bufio.ReadWriter, N int32) {
+	err := writeInt32(rw.Writer, N)
+	if err != nil {
+		log.Fatal(err.Error() + " in SendNumberOfPlayers")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in SendNumberOfPlayers")
+	}
+}
 
 // Sends player his index.
 func SendIndex(rw *bufio.ReadWriter, index int32) {
@@ -123,7 +137,7 @@ func SendWinner(rw *bufio.ReadWriter, i datatypes.WinInfo) {
 // Sends results of the round to the player.
 func SendRes(rw *bufio.ReadWriter, t datatypes.ResultsInfo) {
 	var err error
-	for i := 0; i < 3; i++ {
+	for i := range t.Res {
 		err = writeInt32(rw.Writer, t.Res[i])
 		if err != nil {
 			log.Fatal(err.Error() + "in SendRes")
@@ -153,6 +167,15 @@ func GetHello(rw *bufio.ReadWriter) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+// Gets number of players from the first one to join.
+func GetNumber(rw *bufio.ReadWriter) int32 {
+	n, err := readInt32(rw.Reader)
+	if err != nil {
+		log.Fatal(err.Error() + " in GetNumber")
+	}
+	return n
 }
 
 // Gets a bet from the player.

@@ -37,7 +37,7 @@ type WinInfo struct {
 
 // Information about results of the past round
 type ResultsInfo struct {
-	Res [3]int32
+	Res []int32
 }
 
 // A union of chans, connecting "processor" with "handler"
@@ -79,7 +79,24 @@ func (t *Tunnel) CloseFromHandler() {
 }
 
 // Array which stores information about cards per player for usual rounds.
-var UsualRulesArray = []int32{1, 1, 1, 2, 3, 4, 5,
-	6, 7, 8, 9, 10, 11, 12,
-	12, 12, 11, 9, 7, 4, 2,
-	1, 1, 1}
+var UsualRulesArray = map[int32][]int32{
+	2: {
+		1, 1, 2, 3, 4, 5, 6,
+		7, 8, 9, 10, 11, 12, 13,
+		14, 15, 16, 17, 18, 18,
+		18, 16, 14, 12, 9, 6,
+		4, 2, 1, 1,
+	},
+
+	3: {1, 1, 1, 2, 3, 4, 5,
+		6, 7, 8, 9, 10, 11, 12,
+		12, 12, 11, 9, 7, 4, 2,
+		1, 1, 1,
+	},
+
+	4: {
+		1, 1, 1, 1, 2, 3, 4, 5,
+		6, 7, 8, 9, 9, 9, 9, 6,
+		4, 2, 1, 1, 1, 1,
+	},
+}

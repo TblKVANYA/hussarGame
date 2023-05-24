@@ -1,6 +1,6 @@
 // package client contains a client for Hussar card game, which can be started with the function
 // func Client(string)
-package client
+package main
 
 import (
 	"bufio"
@@ -15,12 +15,18 @@ import (
 	"github.com/TblKVANYA/hussarGame/client/drawer"
 )
 
+func main() {
+	str := "192.168.0.44"
+	Client(str)
+}
+
 // func Client starts a client for Hussar
 func Client(ip string) {
 	if net.ParseIP(ip) == nil {
 		log.Fatal("wrong ip")
 	}
 
+	// establish connection
 	addr := ip + ":8088"
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -34,38 +40,44 @@ func Client(ip string) {
 
 	myIndex := getIndex(serverRW)
 
-	drawer.SetSides(myIndex)
-
-	// Not to let player bet "0" 3 times in a row
-	myBets := make([]int32, 0)
-
 	sendHello(serverRW)
 
+	var playersN int32
+	if myIndex == 0 {
+		playersN = sendNumberOfPlayers(serverRW)
+	} else {
+		playersN = getNumberOfPlayers(serverRW)
+	}
+	drawer.Init(playersN, myIndex)
+
+	// Not to let player bet "0" playersN times in a row
+	myBets := make([]int32, 0)
+
 	for {
-		N := getNumber(serverRW)
+		cardsN := getNumber(serverRW)
 
 		// End flag
-		if N == -1 {
+		if cardsN == -1 {
 			break
 		}
 		// Scan primary info
 		att, darkFlag := getInfo(serverRW)
 
-		drawer.UpdateIndex(N)
+		drawer.UpdateIndex(cardsN)
 		var myCards []int32
 
 		// Dark round check
 		if darkFlag == 0 {
-			myCards = getCards(serverRW, N)
-			myBets = takeBets(serverRW, myBets, att, myIndex)
+			myCards = getCards(serverRW, cardsN)
+			myBets = takeBets(serverRW, myBets, att, myIndex, playersN)
 		} else {
-			myBets = takeBets(serverRW, myBets, att, myIndex)
-			myCards = getCards(serverRW, N)
+			myBets = takeBets(serverRW, myBets, att, myIndex, playersN)
+			myCards = getCards(serverRW, cardsN)
 		}
 
 		// Holding a board and its results
-		for n := N; n > 0; n-- {
-			takeBoard(serverRW, myCards, n, att, myIndex)
+		for n := cardsN; n > 0; n-- {
+			takeBoard(serverRW, myCards, n, att, myIndex, playersN)
 			drawer.UpdateIndex(n - 1)
 
 			att = getWinner(serverRW)
@@ -75,7 +87,7 @@ func Client(ip string) {
 
 		// Get results of the round
 		tmp := int32(0)
-		for i := int32(0); i < 3; i++ {
+		for i := int32(0); i < playersN; i++ {
 			tmp = getRes(serverRW)
 			drawer.AddRes(i, tmp)
 		}
@@ -84,30 +96,30 @@ func Client(ip string) {
 }
 
 // takeBets leads player through bets
-func takeBets(rw *bufio.ReadWriter, myBets []int32, att, myIndex int32) []int32 {
+func takeBets(rw *bufio.ReadWriter, myBets []int32, att, myIndex, playersN int32) []int32 {
 	var arrState int32
-	for i := int32(0); i < 3; i++ {
-		arrState = (3 + att + i - myIndex) % 3
+	for i := int32(0); i < playersN; i++ {
+		arrState = (playersN + att + i - myIndex) % playersN
 		drawer.SetArrow(arrState)
 		drawer.Draw()
 		var b int32
 		// time for own bet
 		if arrState == 0 {
-			b, myBets = scanUserBet(myBets)
+			b, myBets = scanUserBet(myBets, playersN)
 			sendBet(rw, b)
 		}
 
 		b = getBet(rw)
-		drawer.SetBet((att+i)%3, b)
+		drawer.SetBet((att+i)%playersN, b)
 	}
 	return myBets
 }
 
 // takeBoard leads client through board
-func takeBoard(rw *bufio.ReadWriter, myCards []int32, totalCards, att, myIndex int32) {
+func takeBoard(rw *bufio.ReadWriter, myCards []int32, totalCards, att, myIndex, playersN int32) {
 	var arrState int32
-	for i := int32(0); i < 3; i++ {
-		arrState = (3 + att + i - myIndex) % 3
+	for i := int32(0); i < playersN; i++ {
+		arrState = (playersN + att + i - myIndex) % playersN
 		drawer.SetArrow(arrState)
 		drawer.Draw()
 		var c int32
@@ -125,9 +137,9 @@ func takeBoard(rw *bufio.ReadWriter, myCards []int32, totalCards, att, myIndex i
 		}
 
 		// store visible changes of the board
-		drawer.FlushCard((att+i)%3, totalCards-1)
+		drawer.FlushCard((att+i)%playersN, totalCards-1)
 		c = getCard(rw)
-		drawer.SetCard((att+i)%3, c)
+		drawer.SetCard((att+i)%playersN, c)
 	}
 	drawer.Draw()
 
@@ -143,9 +155,10 @@ func sendHello(rw *bufio.ReadWriter) {
 	fmt.Println("Remember, that J♧ is the magic card. It could be interpretated as any of 36 usual cards. Moreover, it could be interpretated as a 5 of any suit")
 	fmt.Println("What's more, it could be a S(uperior) of any suit. S is a rank superior to any other")
 	fmt.Println("To choose your card print its index(written under the card)")
-	fmt.Println("Do not send bet==0 three times in a row.")
-	fmt.Println("There is a dark round with 12 cards per player, where you bet before watching cards")
-	fmt.Println("Also there is an untrumped round. Points in the last round will be multiplyed by 3")
+	fmt.Println("Do not send 0 as a bet for many times in a row.")
+	fmt.Println("There is a dark round with 12 cards per player, where you bet before watching cards.")
+	fmt.Println("Also there is an untrumped round.")
+	fmt.Println("Points in the last round will be multiplyed by 3.")
 
 	// Some greeting
 	fmt.Println("Print smth (preferably \"go\") to start")
@@ -164,7 +177,21 @@ func sendHello(rw *bufio.ReadWriter) {
 	fmt.Println("Waiting for others")
 }
 
-// sends bet b to rw
+// sendNumberOfPlayers gives a choice how many players will be playing for a user and sends his option to server.
+func sendNumberOfPlayers(rw *bufio.ReadWriter) int32 {
+	n := scanNumberOfPlayers()
+	err := writeInt32(rw.Writer, n)
+	if err != nil {
+		log.Fatal(err.Error() + " in sendNumberOfPlayers")
+	}
+	err = rw.Writer.Flush()
+	if err != nil {
+		log.Fatal(err.Error() + " in sendNumberOfPlayers")
+	}
+	return n
+}
+
+// sendBet sends bet b to rw
 func sendBet(rw *bufio.ReadWriter, b int32) {
 	err := writeInt32(rw.Writer, b)
 	if err != nil {
@@ -200,6 +227,15 @@ func getIndex(rw *bufio.ReadWriter) (i int32) {
 		log.Fatal(err.Error() + " in getIndex")
 	}
 	return
+}
+
+// getNumberOfPlayers gets number of participants from rw.
+func getNumberOfPlayers(rw *bufio.ReadWriter) (n int32) {
+	n, err := readInt32(rw.Reader)
+	if err != nil {
+		log.Fatal(err.Error() + " in getPN")
+	}
+	return n
 }
 
 // getInfo gets majot info about upcoming round
@@ -312,19 +348,32 @@ func readInt32(r *bufio.Reader) (int32, error) {
 	return val, nil
 }
 
+// scanNumberOfPlayers scans first player's choice of how many players will be playing.
+func scanNumberOfPlayers() int32 {
+	var n int32
+	for n < 2 || n > 4 {
+		fmt.Println("You have started a game. Choose how many players will play. Current options are: 2-4")
+		fmt.Scanf("%d", &n)
+	}
+	return n
+}
+
 // scanUserBet scans player's bet from keyboard, checks it's correctness and sends it to server.
-func scanUserBet(prevBets []int32) (int32, []int32) {
+func scanUserBet(prevBets []int32, playersN int32) (int32, []int32) {
 	var b int32 = -1
 	for {
 		fmt.Println("Send bet")
 		fmt.Scanf("%d", &b)
-		if b >= 0 && b <= 12 {
-			if len(prevBets) < 2 {
+		if b >= 0 && b <= 20 {
+			if len(prevBets) < int(playersN)-1 {
 				prevBets = append(prevBets, b)
 				break
 			}
-			if b != 0 || prevBets[len(prevBets)-1] != 0 || prevBets[len(prevBets)-2] != 0 {
-				fmt.Println(b, prevBets[len(prevBets)-1], prevBets[len(prevBets)-2])
+			sum := b
+			for i := len(prevBets) - int(playersN) + 1; i < len(prevBets); i++ {
+				sum += prevBets[i]
+			}
+			if sum != 0 {
 				prevBets = append(prevBets, b)
 				break
 			}
@@ -357,8 +406,10 @@ func parseMagic() int32 {
 		fmt.Scanf("%s", &s)
 		num, err := strconv.Atoi(s)
 		if err == nil {
-			c += (int32(num) - 5) * 4
-			break
+			if num >= 5 && num <= 10 {
+				c += (int32(num) - 5) * 4
+				break
+			}
 		} else {
 			if s == "J" || s == "j" {
 				c += 24

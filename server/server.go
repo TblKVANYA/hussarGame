@@ -1,6 +1,6 @@
 // package server contains a server for Hussar, which can be started with the function
 // func Server()
-package server
+package main
 
 import (
 	"errors"
@@ -14,6 +14,10 @@ import (
 	"github.com/TblKVANYA/hussarGame/server/processor"
 )
 
+func main() {
+	Server()
+}
+
 // func Server starts a server for Hussar
 func Server() {
 	str, err := getIP()
@@ -23,31 +27,49 @@ func Server() {
 	fmt.Println(str)
 	str += ":8088"
 
+	// start the listener
 	listener, err := net.Listen("tcp", str)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	var done [3]chan struct{}
-	for i := 0; i < 3; i++ {
-		done[i] = make(chan struct{})
+	// init chans
+	var done []chan struct{}
+	done = append(done, make(chan struct{}))
+
+	var tunnels []datatypes.Tunnel
+	tunnels = append(tunnels, datatypes.TunnelInit())
+
+	// some dances to get number of total players from someone who was the first to join
+	numberChan := make(chan int32)
+	conn, err := listener.Accept()
+	if err != nil {
+		log.Fatal(err)
+	}
+	go handler.HandleFirstConn(conn, tunnels[0], done[0], numberChan)
+
+	N := <-numberChan
+
+	// append some chans
+	for i := int32(1); i < N; i++ {
+		done = append(done, make(chan struct{}))
+		tunnels = append(tunnels, datatypes.TunnelInit())
 	}
 
-	var tunnels [3]datatypes.Tunnel
-	for i := 0; i < 3; i++ {
-		tunnels[i] = datatypes.TunnelInit()
-	}
+	// start "processor"
+	go processor.Processor(tunnels, N)
 
-	go processor.Processor(tunnels)
-
-	for i := 0; i < 3; i++ {
+	// start N-1 connections
+	for i := int32(1); i < N; i++ {
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Fatal(err)
 		}
-		go handler.HandleConn(conn, datatypes.Player(i), tunnels[i], done[i])
+		go handler.HandleConn(conn, datatypes.Player(i), tunnels[i], done[i], N)
 	}
-	for i := 0; i < 3; i++ {
+
+	// wait for the end.
+	for i := int32(0); i < N; i++ {
 		<-done[i]
 	}
 }

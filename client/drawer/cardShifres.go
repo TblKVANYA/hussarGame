@@ -1,8 +1,7 @@
 // package drawer provides a console client for hussar.
 // Functions are:
-// func Draw()
+// func Init       (int32, int32)
 // func UpdateIndex(int32)
-// func SetSides   (int32)
 // func SetBet     (int32, int32)
 // func SetDecks   ([]int32)
 // func SetCard    (int32, int32)
@@ -14,6 +13,7 @@
 // func AddWin     (int32)
 // func AddRes     (int32, int32)
 // func ReplaceCard(int32, int32)
+// func Draw       ()
 package drawer
 
 var (

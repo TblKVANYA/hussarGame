@@ -1,5 +1,5 @@
 // Package processor implement the processor of the game, which encapsulates much of the logic of the program.
-// The only callable function is Processor([3]datatypes.Tunnel)
+// The only callable function is Processor([]datatypes.Tunnel, int32)
 package processor
 
 import (
@@ -8,10 +8,10 @@ import (
 	"github.com/TblKVANYA/hussarGame/server/datatypes"
 )
 
-// holdRound holds the whole round with cardsN cards and returns updated table of players ans scores.
+// holdRound holds the whole round with cardsN cards and playesN players and returns updated table of players ans scores.
 // Attacker stands for the player, who bets and moves on the first board of round before others.
 // Fl can take values of 0 (usual round), 1 (dark round), 2 (untrumped round) and 3(golden round)
-func holdRound(attacker, cardsN int32, table [3]int32, random *rand.Rand, tunnels [3]datatypes.Tunnel, fl int) [3]int32 {
+func holdRound(attacker, cardsN int32, table []int32, random *rand.Rand, tunnels []datatypes.Tunnel, fl int, playersN int32) []int32 {
 	// Shuffle cards
 	shuffled, trump := shuffleCards(random)
 
@@ -26,29 +26,29 @@ func holdRound(attacker, cardsN int32, table [3]int32, random *rand.Rand, tunnel
 		df = 1
 	}
 	// Send cards and round info
-	sendCards(shuffled, cardsN, trump, attacker, tunnels, df)
+	sendCards(shuffled, cardsN, trump, attacker, tunnels, df, playersN)
 
 	// Get bets
-	bets := getBets(attacker, tunnels)
+	bets := getBets(attacker, tunnels, playersN)
 
 	// Hold boards
-	wins := [3]int32{0, 0, 0}
+	wins := make([]int32, playersN)
 	for n := int32(0); n < cardsN; n++ {
-		attacker = holdBoard(attacker, trump, tunnels)
+		attacker = holdBoard(attacker, trump, tunnels, playersN)
 		wins[attacker]++
 	}
 
 	// Calculate results of round
-	results := calculateResults(bets, wins)
+	results := calculateResults(bets, wins, playersN)
 	// Is it golden round?
 	if fl == 3 {
-		for i := 0; i < 3; i++ {
+		for i := int32(0); i < playersN; i++ {
 			results[i] *= 3
 		}
 	}
 	// End round
-	sendRes(results, tunnels)
-	table = updateTable(table, results)
+	sendRes(results, tunnels, playersN)
+	table = updateTable(table, results, playersN)
 
 	return table
 }
@@ -68,21 +68,21 @@ func shuffleCards(random *rand.Rand) ([]datatypes.Card, int32) {
 
 // Send cards and information about round to each player.
 // Att stands for the player, who bets and moves on the first board of round before others.
-func sendCards(shuffled []datatypes.Card, N, tr, att int32, tunnels [3]datatypes.Tunnel, df int32) {
+func sendCards(shuffled []datatypes.Card, N, tr, att int32, tunnels []datatypes.Tunnel, df int32, playersN int32) {
 	// Fill cards for each player
-	cards := make([][]datatypes.Card, 3)
-	for i := 0; i < 3; i++ {
+	cards := make([][]datatypes.Card, playersN)
+	for i := int32(0); i < playersN; i++ {
 		cards[i] = make([]datatypes.Card, N)
 	}
 	for i := int32(0); i < N; i++ {
-		cards[0][i] = shuffled[3*i]
-		cards[1][i] = shuffled[3*i+1]
-		cards[2][i] = shuffled[3*i+2]
+		for j := int32(0); j < playersN; j++ {
+			cards[j][i] = shuffled[playersN*i+j]
+		}
 	}
 
 	// Send info
 	r := datatypes.RoundInfo{NumOfCards: N, Cards: nil, Attacker: datatypes.Player(att), Trump: tr, DarkFlag: df}
-	for i := 0; i < 3; i++ {
+	for i := int32(0); i < playersN; i++ {
 		r.Cards = cards[i]
 		tunnels[i].NewRound <- r
 	}
@@ -90,12 +90,13 @@ func sendCards(shuffled []datatypes.Card, N, tr, att int32, tunnels [3]datatypes
 
 // Get bets from each player and inform others about it.
 // Att stands for the first player to bet
-func getBets(att int32, tunnels [3]datatypes.Tunnel) (bets [3]int32) {
-	for i := int32(0); i < 3; i++ {
-		bet := <-tunnels[(att+i)%3].BetToProc
+func getBets(att int32, tunnels []datatypes.Tunnel, playersN int32) (bets []int32) {
+	bets = make([]int32, playersN)
+	for i := int32(0); i < playersN; i++ {
+		bet := <-tunnels[(att+i)%playersN].BetToProc
 		bets[bet.Player] = bet.Bet
 		// Send bet to other players
-		for j := 0; j < 3; j++ {
+		for j := int32(0); j < playersN; j++ {
 			tunnels[j].BetFromProc <- bet
 		}
 	}
@@ -104,25 +105,25 @@ func getBets(att int32, tunnels [3]datatypes.Tunnel) (bets [3]int32) {
 
 // holdBoard holds moves on the board and returns the winner of the board.
 // Att stands for the player, who moves first on this board
-func holdBoard(att, trump int32, tunnels [3]datatypes.Tunnel) (winner int32) {
+func holdBoard(att, trump int32, tunnels []datatypes.Tunnel, playersN int32) (winner int32) {
 	// Create a board to store cards
-	board := [3]datatypes.Card{0, 0, 0}
+	board := make([]datatypes.Card, playersN)
 
 	// Fill board
-	for i := int32(0); i < 3; i++ {
-		move := <-tunnels[(att+i)%3].MoveToProc
+	for i := int32(0); i < playersN; i++ {
+		move := <-tunnels[(att+i)%playersN].MoveToProc
 		board[i] = move.Card
 		// Send move to all players
-		for j := 0; j < 3; j++ {
+		for j := int32(0); j < playersN; j++ {
 			tunnels[j].MoveFromProc <- move
 		}
 	}
 
 	// Calculate who wins the board
-	winner = calculateWinner(board, trump, att)
+	winner = calculateWinner(board, trump, att, playersN)
 
 	// Tell who wins
-	for i := 0; i < 3; i++ {
+	for i := int32(0); i < playersN; i++ {
 		tunnels[i].WinnerName <- datatypes.WinInfo{Player: datatypes.Player(winner)}
 	}
 
@@ -130,8 +131,9 @@ func holdBoard(att, trump int32, tunnels [3]datatypes.Tunnel) (winner int32) {
 }
 
 // Calculate results of the round, considering bets and actual wins.
-func calculateResults(bets, wins [3]int32) (res [3]int32) {
-	for i := 0; i < 3; i++ {
+func calculateResults(bets, wins []int32, playersN int32) (res []int32) {
+	res = make([]int32, playersN)
+	for i := int32(0); i < playersN; i++ {
 		if wins[i] > bets[i] {
 			res[i] = wins[i]
 		} else if wins[i] == bets[i] {
@@ -144,29 +146,31 @@ func calculateResults(bets, wins [3]int32) (res [3]int32) {
 }
 
 // Update the table with the rusults of the last round.
-func updateTable(table, res [3]int32) [3]int32 {
-	for i := 0; i < 3; i++ {
+func updateTable(table, res []int32, playersN int32) []int32 {
+	for i := int32(0); i < playersN; i++ {
 		table[i] += res[i]
 	}
 	return table
 }
 
 // sendRes sends points of each player to handlers.
-func sendRes(res [3]int32, tunnels [3]datatypes.Tunnel) {
-	for i := 0; i < 3; i++ {
+func sendRes(res []int32, tunnels []datatypes.Tunnel, playersN int32) {
+	for i := int32(0); i < playersN; i++ {
 		tunnels[i].RoundResults <- datatypes.ResultsInfo{Res: res}
 	}
 }
 
 // calculateWinner returns the index of winner of the board.
-func calculateWinner(b [3]datatypes.Card, tr, att int32) (winner int32) {
-	if !beats(b[0], b[1], tr) && !beats(b[0], b[2], tr) {
-		return att
+func calculateWinner(b []datatypes.Card, tr, att int32, playersN int32) (winner int32) {
+	leader := datatypes.MoveInfo{Player: 0, Card: b[0]}
+
+	for i := int32(1); i < playersN; i++ {
+		if beats(leader.Card, b[i], tr) {
+			leader = datatypes.MoveInfo{Player: datatypes.Player(i), Card: b[i]}
+		}
 	}
-	if !beats(b[1], b[2], tr) {
-		return (att + 1) % 3
-	}
-	return (att + 2) % 3
+
+	return (att + int32(leader.Player)) % playersN
 }
 
 // beats returns true, if second cards beats first, considering trump.
