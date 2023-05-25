@@ -1,6 +1,6 @@
 // package client contains a client for Hussar card game, which can be started with the function
 // func Client(string)
-package main
+package client
 
 import (
 	"bufio"
@@ -14,11 +14,6 @@ import (
 
 	"github.com/TblKVANYA/hussarGame/client/drawer"
 )
-
-func main() {
-	str := "192.168.0.44"
-	Client(str)
-}
 
 // func Client starts a client for Hussar
 func Client(ip string) {

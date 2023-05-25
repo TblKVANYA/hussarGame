@@ -1,6 +1,6 @@
 // package server contains a server for Hussar, which can be started with the function
 // func Server()
-package main
+package server
 
 import (
 	"errors"
@@ -13,10 +13,6 @@ import (
 	"github.com/TblKVANYA/hussarGame/server/handler"
 	"github.com/TblKVANYA/hussarGame/server/processor"
 )
-
-func main() {
-	Server()
-}
 
 // func Server starts a server for Hussar
 func Server() {
