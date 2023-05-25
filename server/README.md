@@ -10,7 +10,7 @@ go mod init serverhussar
 ```
 3. В командной строке исполните команду 
 ```
-go get github.com/TblKVANYA/hussarGame -u
+go get -u github.com/TblKVANYA/hussarGame
 ```
 4. Создайте файл `server.go` и скопируйте в него 
 ```
